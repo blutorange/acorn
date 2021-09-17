@@ -1,10 +1,30 @@
+import type * as ESTree from "estree";
+
 export as namespace acorn
 export = acorn
 
 declare namespace acorn {
-  function parse(input: string, options: Options): Node
+  interface AcornNodeExtras {
+    start: number
+    end: number
+    loc?: SourceLocation
+    sourceFile?: string
+  }
 
-  function parseExpressionAt(input: string, pos: number, options: Options): Node
+  // Acorn adds extra properties to each node. This takes an estree nod
+  // and constructs a new type with the additional properties.
+  type AcornNode<N> =
+    N extends ESTree.BaseNode
+      // It is a node, so (a) extend with extra properties added by acorn and (b) also extend children
+      ? { [P in keyof N]: AcornNode<N[P]> } & AcornNodeExtras
+      : N extends Array<unknown>
+        // It is an array or tuple, extend each element with the extra properties
+        ? { [P in keyof N]: AcornNode<N[P]> }
+        : N
+
+  function parse(input: string, options: Options): AcornNode<ESTree.Program>
+
+  function parseExpressionAt(input: string, pos: number, options: Options): AcornNode<ESTree.Program>
 
   function tokenizer(input: string, options: Options): {
     getToken(): Token
@@ -14,32 +34,32 @@ declare namespace acorn {
   interface Options {
     ecmaVersion: 3 | 5 | 6 | 7 | 8 | 9 | 10 | 11 | 12 | 13 | 2015 | 2016 | 2017 | 2018 | 2019 | 2020 | 2021 | 2022 | 'latest'
     sourceType?: 'script' | 'module'
-    onInsertedSemicolon?: (lastTokEnd: number, lastTokEndLoc?: Position) => void
-    onTrailingComma?: (lastTokEnd: number, lastTokEndLoc?: Position) => void
-    allowReserved?: boolean | 'never'
+    onInsertedSemicolon?: ((lastTokEnd: number, lastTokEndLoc?: Position) => void) | null
+    onTrailingComma?: ((lastTokEnd: number, lastTokEndLoc?: Position) => void) | null
+    allowReserved?: boolean | 'never' | null
     allowReturnOutsideFunction?: boolean
     allowImportExportEverywhere?: boolean
-    allowAwaitOutsideFunction?: boolean
-    allowSuperOutsideMethod?: boolean
+    allowAwaitOutsideFunction?: boolean | null
+    allowSuperOutsideMethod?: boolean | null
     allowHashBang?: boolean
     locations?: boolean
-    onToken?: ((token: Token) => any) | Token[]
+    onToken?: ((token: Token) => unknown) | Token[] | null
     onComment?: ((
       isBlock: boolean, text: string, start: number, end: number, startLoc?: Position,
       endLoc?: Position
-    ) => void) | Comment[]
+    ) => void) | Comment[] | null
     ranges?: boolean
-    program?: Node
-    sourceFile?: string
-    directSourceFile?: string
+    program?: AcornNode<ESTree.Program>
+    sourceFile?: string | null
+    directSourceFile?: string | null
     preserveParens?: boolean
   }
 
   class Parser {
     constructor(options: Options, input: string, startPos?: number)
-    parse(this: Parser): Node
-    static parse(this: typeof Parser, input: string, options: Options): Node
-    static parseExpressionAt(this: typeof Parser, input: string, pos: number, options: Options): Node
+    parse(this: Parser): AcornNode<ESTree.Program>
+    static parse<O extends Options>(this: typeof Parser, input: string, options: O): AcornNode<ESTree.Program>
+    static parseExpressionAt<O extends Options>(this: typeof Parser, input: string, pos: number, options: O): AcornNode<ESTree.Program>
     static tokenizer(this: typeof Parser, input: string, options: Options): {
       getToken(): Token
       [Symbol.iterator](): Iterator<Token>
@@ -49,7 +69,7 @@ declare namespace acorn {
 
   interface Position { line: number; column: number; offset: number }
 
-  const defaultOptions: Options
+  const defaultOptions: Required<Options>
 
   function getLineInfo(input: string, offset: number): Position
 
@@ -70,6 +90,17 @@ declare namespace acorn {
     constructor(parser: Parser, pos: number, loc?: SourceLocation)
   }
 
+  interface TokenTypeConfig {
+    keyword: string
+    beforeExpr: boolean
+    startsExpr: boolean
+    isLoop: boolean
+    isAssign: boolean
+    prefix: boolean
+    postfix: boolean
+    binop: number | null
+  }
+
   class TokenType {
     label: string
     keyword: string
@@ -79,9 +110,9 @@ declare namespace acorn {
     isAssign: boolean
     prefix: boolean
     postfix: boolean
-    binop: number
-    updateContext?: (prevType: TokenType) => void
-    constructor(label: string, conf?: any)
+    binop: number | null
+    updateContext: ((prevType: TokenType) => void) | null
+    constructor(label: string, conf?: TokenTypeConfig)
   }
 
   const tokTypes: {
@@ -162,7 +193,12 @@ declare namespace acorn {
   }
 
   class TokContext {
-    constructor(token: string, isExpr: boolean, preserveSpace: boolean, override?: (p: Parser) => void)
+    token: string
+    isExpr: boolean
+    preserveSpace: boolean
+    override: ((p: Parser) => void) | null | undefined
+    generator: boolean
+    constructor(token: string, isExpr: boolean, preserveSpace: boolean, override?: (p: Parser) => void, generator?: boolean)
   }
 
   const tokContexts: {
@@ -196,7 +232,7 @@ declare namespace acorn {
 
   class Token {
     type: TokenType
-    value: any
+    value: unknown
     start: number
     end: number
     loc?: SourceLocation
@@ -209,6 +245,8 @@ declare namespace acorn {
   const lineBreak: RegExp
 
   const lineBreakG: RegExp
+
+  const nonASCIIwhitespace: RegExp
 
   const version: string
 }
